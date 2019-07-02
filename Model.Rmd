@@ -1,0 +1,1234 @@
+---
+title: "Model Building"
+author: " Priya Agrawal, Harsh Shukla"
+date: "17 July 2018"
+runtime: shiny
+output: 
+      flexdashboard::flex_dashboard:
+        orientation: column
+        vertical_layout: scroll
+  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Model Description {data-navmenu="Project Sections"}
+### Basic Steps in the Model
+
+* Apply the Particular Model
+
+* Apply Variation Inflation Factor(vif) on that Model
+
+* Cross validation of that Model
+
+* Calculation of Elasticity
+
+* Plot the result
+
+### Simple Linear Model
+The aim of linear regression is to model a continuous variable Y as a mathematical function of one or more X variable(s), so that we can use this regression model to predict the Y when only the X is known. This mathematical equation can be generalized as follows:
+ 
+  Y = β1 + β2X + ϵ
+
+where, β1 is the intercept and β2 is the slope. Collectively, they are called regression coefficients. ϵ is the error term, the part of Y the regression model is unable to explain.
+
+### Multiplicative Model
+This model assumes that as the data increase, so does the seasonal pattern. Most time series plots exhibit such a pattern. In this model, the trend and seasonal components are multiplied and then added to the error component.
+Multiplicative model’s benefits include synergistic impact of **marketing activities, independence of shapes of transformations** independent variable scan take due to coefficient values and coefficients directly provide simple elasticity indications.
+
+### Kyock Model
+The Koyck model may be considered a simple augmentation of the basic linear model , which includes the lagged dependent variable as independent variable.What this specification means is that sales depend on sales of the prior period and all the independent variables that caused prior sales,plus the current values of the same independent variables
+
+### Distributed Lag Model
+A distributed-lag model is a dynamic model in which the effect of a regressor x on y occurs over time rather than all at once.
+The distributed lag model is a model with multiple lagged values of both the dependent variable and the independent variable.
+This model is very general and can capture a whole range of carryover effects. Indeed, the Koyck model can be considered a special case
+of distributed lag model with only one lagged value of the dependent variable. The distributed lag model overcomes two of the problems with the Koyck model.
+First, ***it allows for decay functions, which are nonmonotonic or humped shaped***. 
+Second, ***it can partly separate out the carryover effects of different independent variables***.
+
+### Multiplicative +Distributed Lag Model
+
+
+
+
+# Model on Home Audio Accessories Final {data-navmenu="Project Sections"}
+
+
+
+```{r echo=FALSE}
+options(warn=-1)
+library(magrittr)
+library(knitr)
+library(DT)
+library(ggplot2);
+library(plyr);
+library(dplyr);
+library(Hmisc);
+library(broom);
+library(xts);
+library(lubridate)
+library(cluster)
+library(zoo)
+library(car)
+library(MASS)
+library(caret)
+library(DataCombine)
+options(warn=-1)
+# Function for Various Model
+data_final <- read.csv("home_audio_final")
+# Building the Baisc Linear regression Model
+Linear_model <-data_final
+Linear_model <- scale(Linear_model)
+Linear_model <-data.frame(Linear_model)
+model_1 <- lm(gmv~.,Linear_model)
+
+
+
+all_vifs <- vif(model_1)
+
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 2)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Linear_model)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+##Final Model 
+Linear_Final_model <- selectedMod
+
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data = Linear_model, method = "lm",
+               trControl = train.control)
+
+
+
+
+# Elasticity Analysis
+train <- Linear_model
+hrlm<-Linear_Final_model
+# estimating the elasticity coefficients
+elasticity <- function(var){
+  
+  elax1 <-as.numeric(hrlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  
+  return(elax1)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm$coefficients)){
+  
+  var_list[i-1] <-elasticity(names(hrlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm$coefficients[2:length(hrlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+print(ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Home_Audio - Linear Model") +xlab("Variables"))
+
+
+multi <-data_final
+multi <- multi[,-c(20:28)]
+multi$number[which(multi$number==0)] <- 0.01
+multi$Content.Marketing[which(multi$Content.Marketing==0)] <- 0.01
+multi$per_order[which(multi$per_order==0)] <- 0.01
+multi$TV[which(multi$TV==0)] <- 0.01
+multi <- log(multi)
+## First model ##
+multi_model <- lm(gmv~.,multi)
+
+
+
+all_vifs <- vif(multi_model)
+
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 1.1)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=multi)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+Multi_Final_model <- selectedMod
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val1 <- train(myForm, data = multi, method = "lm",
+               trControl = train.control)
+
+
+# Elasticity Analysis
+train1 <- multi
+hrlm1<-Multi_Final_model
+# estimating the elasticity coefficients
+elasticity1 <- function(var){
+  
+  elax2 <-as.numeric(hrlm1$coefficients[var]*mean(train1[,var])/mean(train1$gmv))
+  
+  return(elax2)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm1$coefficients)){
+  
+  var_list[i-1] <-elasticity1(names(hrlm1$coefficients)[i])
+  
+}
+
+elasticity.outputs1 <- data.frame(names(hrlm1$coefficients[2:length(hrlm1$coefficients)]))
+elasticity.outputs1 <- cbind(elasticity.outputs1,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs1) <- c("Variable","Elasticity")
+
+elasticity.outputs1$direction <- ifelse(elasticity.outputs1$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs1, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Home_Audio- Multiplicative Model") +xlab("Variables")
+
+
+
+Home_koyck<-data_final
+#gmv Lag 1
+Home_Koyck<-slide(Home_koyck,Var="gmv",slideBy =-1)
+Home_Koyck<-na.omit(Home_koyck)
+Home_Koyck<-scale(Home_koyck)
+Home_Koyck<-data.frame(Home_koyck)
+
+# Build Kyock model
+Koy_model <- lm(gmv~.,Home_koyck)
+all_vifs <- vif(Koy_model)
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 2)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Home_koyck)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+kyock_Final_model <- selectedMod
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val2 <- train(myForm, data = Home_koyck, method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train2 <- Home_koyck
+hrlm2<-kyock_Final_model
+# estimating the elasticity coefficients
+elasticity2 <- function(var){
+  
+  elax2 <-as.numeric(hrlm2$coefficients[var]*mean(train2[,var])/mean(train2$gmv))
+
+  return(elax2)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm2$coefficients)){
+  
+  var_list[i-1] <-elasticity2(names(hrlm2$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm2$coefficients[2:length(hrlm2$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Home_Audio - Koyck Model") +xlab("Variables")
+
+Dis_Model <- data_final
+Dis_model <- slide(Dis_Model, Var = "gmv",slideBy = -1)
+Dis_model <- slide(Dis_model, Var = "gmv",slideBy = -2)
+Dis_model <- slide(Dis_model, Var = "gmv",slideBy = -3)
+Dis_model <- na.omit(Dis_model)
+Dis_model <- scale(Dis_model)
+Dis_model <- data.frame(Dis_model)
+
+dist_model <- lm(gmv~.,Dis_model)
+
+
+
+all_vif <- vif(dist_model)
+signif_all <- names(all_vif)
+
+ while(any(all_vif > 2)){
+  var_with_max_vif <- names(which(all_vif == max(all_vif)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Dis_model)  # re-build model with new formula
+  all_vif <- vif(selectedMod)
+}
+
+Distributed_Final_model <- selectedMod
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data =Dis_model , method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train <- Dis_model
+hrlm<-Distributed_Final_model
+# estimating the elasticity coefficients
+elasticity <- function(var){
+  elax1 <-as.numeric(hrlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  return(elax1)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm$coefficients)){
+  
+  var_list[i-1] <- elasticity(names(hrlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm$coefficients[2:length(hrlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Home_Audio- Distributed_lag Model") +xlab("Variables")
+
+
+Multi_dist <-data_final[,-c(20:28)]
+Multi_Dis_model_1 <- slide(Multi_dist, Var = "gmv",slideBy = -1)
+Multi_Dis_model_1 <- slide(Multi_Dis_model_1, Var = "gmv",slideBy = -2)
+Multi_Dis_model_1 <- slide(Multi_Dis_model_1, Var = "gmv",slideBy = -3)
+Multi_dist <- na.omit(Multi_Dis_model_1)
+
+Multi_dist$Content.Marketing[which(Multi_dist$Content.Marketing==0)] <-1
+Multi_dist$per_order[which(Multi_dist$per_order==0)] <-0.01
+Multi_dist$number[which(Multi_dist$number==0)] <-0.01
+Multi_dist$TV[which(Multi_dist$TV==0)] <-0.01
+Multi_dist <- log(Multi_dist)
+
+distMulti <- lm(gmv~., Multi_dist)
+
+
+
+all_vif <- vif(distMulti )
+signif_all <- names(all_vif)
+
+ while(any(all_vif > 1.2)){
+  var_with_max_vif <- names(which(all_vif == max(all_vif)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Multi_dist)  # re-build model with new formula
+  all_vif <- vif(selectedMod)
+}
+
+DistributedMulti_Final_model <- selectedMod
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data =Multi_dist , method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# estimating the elasticity coefficients
+train <- Multi_dist
+
+grlm <-DistributedMulti_Final_model 
+elasticity <- function(var){
+  
+  elax1 <-as.numeric(grlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  
+  return(elax1)
+} 
+
+var_list <- list()
+
+for(i in 2:length(grlm$coefficients)){
+  
+  var_list[i-1] <-elasticity(names(grlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(grlm$coefficients[2:length(grlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Home_Audio - Multi. & DL model") +xlab("Variables")
+
+
+
+```
+
+# Model on camera  Accessories Final {data-navmenu="Project Sections"}
+```{r echo=FALSE}
+
+options(warn=-1)
+library(magrittr)
+library(knitr)
+library(DT)
+library(ggplot2);
+library(plyr);
+library(dplyr);
+library(Hmisc);
+library(broom);
+library(xts);
+library(lubridate)
+library(cluster)
+library(zoo)
+library(car)
+library(MASS)
+library(caret)
+library(DataCombine)
+options(warn=-1)
+# Function for Various Model
+data1_final <- read.csv("camera_accesory_final")
+# Building the Baisc Linear regression Model
+Linear_model <-data1_final
+Linear_model <- scale(Linear_model)
+Linear_model <-data.frame(Linear_model)
+model_1 <- lm(gmv~.,Linear_model)
+
+
+
+all_vifs <- vif(model_1)
+
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 2)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Linear_model)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+##Final Model 
+Linear_Final_model <- selectedMod
+
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data = Linear_model, method = "lm",
+               trControl = train.control)
+# Summarize the results
+
+
+
+# Elasticity Analysis
+train <- Linear_model
+hrlm<-Linear_Final_model
+# estimating the elasticity coefficients
+elasticity <- function(var){
+  
+  elax1 <-as.numeric(hrlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  
+  return(elax1)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm$coefficients)){
+  
+  var_list[i-1] <-elasticity(names(hrlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm$coefficients[2:length(hrlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+print(ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Camera_Accessory - Linear Model") +xlab("Variables"))
+
+
+multi <-data_final
+multi <- multi[,-c(20:28)]
+multi$number[which(multi$number==0)] <- 0.01
+multi$Content.Marketing[which(multi$Content.Marketing==0)] <- 0.01
+multi$per_order[which(multi$per_order==0)] <- 0.01
+multi$TV[which(multi$TV==0)] <- 0.01
+
+multi <- log(multi)
+## First model ##
+multi_model <- lm(gmv~.,multi)
+
+
+
+all_vifs <- vif(multi_model)
+
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 1.1)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=multi)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+Multi_Final_model <- selectedMod
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val1 <- train(myForm, data = multi, method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train1 <- multi
+hrlm1<-Multi_Final_model
+# estimating the elasticity coefficients
+elasticity1 <- function(var){
+  
+  elax2 <-as.numeric(hrlm1$coefficients[var]*mean(train1[,var])/mean(train1$gmv))
+  
+  return(elax2)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm1$coefficients)){
+  
+  var_list[i-1] <-elasticity1(names(hrlm1$coefficients)[i])
+  
+}
+
+elasticity.outputs1 <- data.frame(names(hrlm1$coefficients[2:length(hrlm1$coefficients)]))
+elasticity.outputs1 <- cbind(elasticity.outputs1,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs1) <- c("Variable","Elasticity")
+
+elasticity.outputs1$direction <- ifelse(elasticity.outputs1$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs1, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Camera_Accessory- Multiplicative Model") +xlab("Variables")
+
+
+
+Home_koyck<-data_final
+#gmv Lag 1
+Home_Koyck<-slide(Home_koyck,Var="gmv",slideBy =-1)
+Home_Koyck<-na.omit(Home_koyck)
+Home_Koyck<-scale(Home_koyck)
+Home_Koyck<-data.frame(Home_koyck)
+
+# Build Kyock model
+Koy_model <- lm(gmv~.,Home_koyck)
+all_vifs <- vif(Koy_model)
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 2)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Home_koyck)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+kyock_Final_model <- selectedMod
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val2 <- train(myForm, data = Home_koyck, method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train2 <- Home_koyck
+hrlm2<-kyock_Final_model
+# estimating the elasticity coefficients
+elasticity2 <- function(var){
+  
+  elax2 <-as.numeric(hrlm2$coefficients[var]*mean(train2[,var])/mean(train2$gmv))
+
+  return(elax2)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm2$coefficients)){
+  
+  var_list[i-1] <-elasticity2(names(hrlm2$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm2$coefficients[2:length(hrlm2$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Camera_Accessory - Koyck Model") +xlab("Variables")
+
+Dis_Model <- data_final
+Dis_model <- slide(Dis_Model, Var = "gmv",slideBy = -1)
+Dis_model <- slide(Dis_model, Var = "gmv",slideBy = -2)
+Dis_model <- slide(Dis_model, Var = "gmv",slideBy = -3)
+Dis_model <- na.omit(Dis_model)
+Dis_model <- scale(Dis_model)
+Dis_model <- data.frame(Dis_model)
+
+dist_model <- lm(gmv~.,Dis_model)
+
+
+
+all_vif <- vif(dist_model)
+signif_all <- names(all_vif)
+
+ while(any(all_vif > 2)){
+  var_with_max_vif <- names(which(all_vif == max(all_vif)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Dis_model)  # re-build model with new formula
+  all_vif <- vif(selectedMod)
+}
+
+Distributed_Final_model <- selectedMod
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data =Dis_model , method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train <- Dis_model
+hrlm<-Distributed_Final_model
+# estimating the elasticity coefficients
+elasticity <- function(var){
+  elax1 <-as.numeric(hrlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  return(elax1)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm$coefficients)){
+  
+  var_list[i-1] <- elasticity(names(hrlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm$coefficients[2:length(hrlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Camera_Accessory- Distributed_lag Model") +xlab("Variables")
+
+
+Multi_dist <-data_final[,-c(20:28)]
+Multi_Dis_model_1 <- slide(Multi_dist, Var = "gmv",slideBy = -1)
+Multi_Dis_model_1 <- slide(Multi_Dis_model_1, Var = "gmv",slideBy = -2)
+Multi_Dis_model_1 <- slide(Multi_Dis_model_1, Var = "gmv",slideBy = -3)
+Multi_dist <- na.omit(Multi_Dis_model_1)
+
+Multi_dist$Content.Marketing[which(Multi_dist$Content.Marketing==0)] <-1
+Multi_dist$per_order[which(Multi_dist$per_order==0)] <-0.01
+Multi_dist$number[which(Multi_dist$number==0)] <-0.01
+Multi_dist$TV[which(Multi_dist$TV==0)] <-0.01
+Multi_dist <- log(Multi_dist)
+
+distMulti <- lm(gmv~., Multi_dist)
+
+
+
+all_vif <- vif(distMulti )
+signif_all <- names(all_vif)
+
+ while(any(all_vif > 1.2)){
+  var_with_max_vif <- names(which(all_vif == max(all_vif)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Multi_dist)  # re-build model with new formula
+  all_vif <- vif(selectedMod)
+}
+
+DistributedMulti_Final_model <- selectedMod
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data =Multi_dist , method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# estimating the elasticity coefficients
+train <- Multi_dist
+
+grlm <-DistributedMulti_Final_model 
+elasticity <- function(var){
+  
+  elax1 <-as.numeric(grlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  
+  return(elax1)
+} 
+
+var_list <- list()
+
+for(i in 2:length(grlm$coefficients)){
+  
+  var_list[i-1] <-elasticity(names(grlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(grlm$coefficients[2:length(grlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Camera_Accessory - Multi. & DL model") +xlab("Variables")
+
+
+
+```
+
+# Model on Game Accessories Final {data-navmenu="Project Sections"}
+```{r echo=FALSE}
+
+options(warn=-1)
+library(magrittr)
+library(knitr)
+library(DT)
+library(ggplot2);
+library(plyr);
+library(dplyr);
+library(Hmisc);
+library(broom);
+library(xts);
+library(lubridate)
+library(cluster)
+library(zoo)
+library(car)
+library(MASS)
+library(caret)
+library(DataCombine)
+options(warn=-1)
+# Function for Various Model
+data2_final <- read.csv("gaming_accesory_final")
+# Building the Baisc Linear regression Model
+Linear_model <-data2_final
+Linear_model <- scale(Linear_model)
+Linear_model <-data.frame(Linear_model)
+model_1 <- lm(gmv~.,Linear_model)
+
+
+
+all_vifs <- vif(model_1)
+
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 2)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Linear_model)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+##Final Model 
+Linear_Final_model <- selectedMod
+
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data = Linear_model, method = "lm",
+               trControl = train.control)
+# Summarize the results
+
+
+
+# Elasticity Analysis
+train <- Linear_model
+hrlm<-Linear_Final_model
+# estimating the elasticity coefficients
+elasticity <- function(var){
+  
+  elax1 <-as.numeric(hrlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  
+  return(elax1)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm$coefficients)){
+  
+  var_list[i-1] <-elasticity(names(hrlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm$coefficients[2:length(hrlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+print(ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Game_Accessory - Linear Model") +xlab("Variables"))
+
+
+multi <-data_final
+multi <- multi[,-c(20:28)]
+multi$number[which(multi$number==0)] <- 0.01
+multi$Content.Marketing[which(multi$Content.Marketing==0)] <- 0.01
+multi$per_order[which(multi$per_order==0)] <- 0.01
+multi$TV[which(multi$TV==0)] <- 0.01
+
+multi <- log(multi)
+## First model ##
+multi_model <- lm(gmv~.,multi)
+
+
+
+all_vifs <- vif(multi_model)
+
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 1.1)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=multi)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+Multi_Final_model <- selectedMod
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val1 <- train(myForm, data = multi, method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train1 <- multi
+hrlm1<-Multi_Final_model
+# estimating the elasticity coefficients
+elasticity1 <- function(var){
+  
+  elax2 <-as.numeric(hrlm1$coefficients[var]*mean(train1[,var])/mean(train1$gmv))
+  
+  return(elax2)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm1$coefficients)){
+  
+  var_list[i-1] <-elasticity1(names(hrlm1$coefficients)[i])
+  
+}
+
+elasticity.outputs1 <- data.frame(names(hrlm1$coefficients[2:length(hrlm1$coefficients)]))
+elasticity.outputs1 <- cbind(elasticity.outputs1,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs1) <- c("Variable","Elasticity")
+
+elasticity.outputs1$direction <- ifelse(elasticity.outputs1$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs1, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Game_Accessory- Multiplicative Model") +xlab("Variables")
+
+
+
+Home_koyck<-data_final
+#gmv Lag 1
+Home_Koyck<-slide(Home_koyck,Var="gmv",slideBy =-1)
+Home_Koyck<-na.omit(Home_koyck)
+Home_Koyck<-scale(Home_koyck)
+Home_Koyck<-data.frame(Home_koyck)
+
+# Build Kyock model
+Koy_model <- lm(gmv~.,Home_koyck)
+all_vifs <- vif(Koy_model)
+ signif_all <- names(all_vifs)
+
+ while(any(all_vifs > 2)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Home_koyck)  # re-build model with new formula
+  all_vifs <- vif(selectedMod)
+}
+
+kyock_Final_model <- selectedMod
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val2 <- train(myForm, data = Home_koyck, method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train2 <- Home_koyck
+hrlm2<-kyock_Final_model
+# estimating the elasticity coefficients
+elasticity2 <- function(var){
+  
+  elax2 <-as.numeric(hrlm2$coefficients[var]*mean(train2[,var])/mean(train2$gmv))
+
+  return(elax2)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm2$coefficients)){
+  
+  var_list[i-1] <-elasticity2(names(hrlm2$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm2$coefficients[2:length(hrlm2$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Game_Accessory - Koyck Model") +xlab("Variables")
+
+Dis_Model <- data_final
+Dis_model <- slide(Dis_Model, Var = "gmv",slideBy = -1)
+Dis_model <- slide(Dis_model, Var = "gmv",slideBy = -2)
+Dis_model <- slide(Dis_model, Var = "gmv",slideBy = -3)
+Dis_model <- na.omit(Dis_model)
+Dis_model <- scale(Dis_model)
+Dis_model <- data.frame(Dis_model)
+
+dist_model <- lm(gmv~.,Dis_model)
+
+
+
+all_vif <- vif(dist_model)
+signif_all <- names(all_vif)
+
+ while(any(all_vif > 2)){
+  var_with_max_vif <- names(which(all_vif == max(all_vif)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Dis_model)  # re-build model with new formula
+  all_vif <- vif(selectedMod)
+}
+
+Distributed_Final_model <- selectedMod
+
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data =Dis_model , method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# Elasticity Analysis
+train <- Dis_model
+hrlm<-Distributed_Final_model
+# estimating the elasticity coefficients
+elasticity <- function(var){
+  elax1 <-as.numeric(hrlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  return(elax1)
+} 
+var_list <- list()
+
+for(i in 2:length(hrlm$coefficients)){
+  
+  var_list[i-1] <- elasticity(names(hrlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(hrlm$coefficients[2:length(hrlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Game_Accessory- Distributed_lag Model") +xlab("Variables")
+
+
+Multi_dist <-data_final[,-c(20:28)]
+Multi_Dis_model_1 <- slide(Multi_dist, Var = "gmv",slideBy = -1)
+Multi_Dis_model_1 <- slide(Multi_Dis_model_1, Var = "gmv",slideBy = -2)
+Multi_Dis_model_1 <- slide(Multi_Dis_model_1, Var = "gmv",slideBy = -3)
+Multi_dist <- na.omit(Multi_Dis_model_1)
+
+Multi_dist$Content.Marketing[which(Multi_dist$Content.Marketing==0)] <-1
+Multi_dist$per_order[which(Multi_dist$per_order==0)] <-0.01
+Multi_dist$number[which(Multi_dist$number==0)] <-0.01
+Multi_dist$TV[which(Multi_dist$TV==0)] <-0.01
+Multi_dist <- log(Multi_dist)
+
+distMulti <- lm(gmv~., Multi_dist)
+
+
+
+all_vif <- vif(distMulti )
+signif_all <- names(all_vif)
+
+ while(any(all_vif > 1.2)){
+  var_with_max_vif <- names(which(all_vif == max(all_vif)))    # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("gmv ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=Multi_dist)  # re-build model with new formula
+  all_vif <- vif(selectedMod)
+}
+
+DistributedMulti_Final_model <- selectedMod
+
+
+
+# Define training control
+set.seed(123)
+train.control <- trainControl(method = "cv", number = 10)
+# Train the model
+cross_val <- train(myForm, data =Multi_dist , method = "lm",
+               trControl = train.control)
+# Summarize t1he results
+
+
+# estimating the elasticity coefficients
+train <- Multi_dist
+
+grlm <-DistributedMulti_Final_model 
+elasticity <- function(var){
+  
+  elax1 <-as.numeric(grlm$coefficients[var]*mean(train[,var])/mean(train$gmv))
+  
+  return(elax1)
+} 
+
+var_list <- list()
+
+for(i in 2:length(grlm$coefficients)){
+  
+  var_list[i-1] <-elasticity(names(grlm$coefficients)[i])
+  
+}
+
+elasticity.outputs <- data.frame(names(grlm$coefficients[2:length(grlm$coefficients)]))
+elasticity.outputs <- cbind(elasticity.outputs,do.call(rbind.data.frame, var_list))
+colnames(elasticity.outputs) <- c("Variable","Elasticity")
+
+elasticity.outputs$direction <- ifelse(elasticity.outputs$Elasticity > 0, "Positive", "Negative")
+
+
+
+ggplot(data=elasticity.outputs, aes(x=reorder(Variable,Elasticity),y=Elasticity)) +
+  geom_bar(position="dodge",stat="identity") + 
+  coord_flip() +
+  ggtitle("Game_Accessory - Multi. & DL model") +xlab("Variables")
+
+
+
+```
+
+
+# Conculsion Made {data-navmenu="Project Sections"}
+
+############################################### Home Audio Final #####################################################################
+* Linear Model
+    + Adjusted R-squared:  0.391   
+    + RMSE (10 - CV):      0.979
+  
+* Multiplicative Model
+    + Adjusted R-squared:  0.318 
+    + RMSE (10 - CV):       0.057
+
+* Kyock Model
+    + Adjusted R-squared:  0.391 
+    + RMSE (10 - CV):      121.07
+
+* Distributed Lag model
+    + Adjusted R-squared:  0.361 
+    + RMSE (10 - CV):      1.038  
+
+* Multiplicative +Distributed Lag model
+    + Adjusted R-squared:  0.3685 
+    + RMSE (10 - CV):      0.053
+
+
+############################################### Camera Accessory Final #####################################################################
+* Linear Model
+    + Adjusted R-squared:  0.419  
+    + RMSE (10 - CV):      0.92
+  
+* Multiplicative Model
+    + Adjusted R-squared:  0.628
+    + RMSE (10 - CV):      0.227 
+
+* Kyock Model
+    + Adjusted R-squared:  0.391 
+    + RMSE (10 - CV):      246.6
+
+* Distributed Lag model
+    + Adjusted R-squared:  0.361 
+    + RMSE (10 - CV):      1.250
+
+* Multiplicative +Distributed Lag model
+    + Adjusted R-squared:  0.3685 
+    + RMSE (10 - CV):      2.23
+    
+############################################### Gaming Accessory Final #####################################################################
+* Linear Model
+    + Adjusted R-squared:    0.637
+    + RMSE (10 - CV):        0.769
+  
+* Multiplicative Model
+    + Adjusted R-squared:   0.56 
+    + RMSE (10 - CV):       0.18
+
+* Kyock Model
+    + Adjusted R-squared:   0.56
+    + RMSE (10 - CV):       0.189
+
+* Distributed Lag model
+    + Adjusted R-squared:   0.63 
+    + RMSE (10 - CV):       105.26
+
+* Multiplicative +Distributed Lag model
+    + Adjusted R-squared:   0.6705
+    + RMSE (10 - CV):       0.731  

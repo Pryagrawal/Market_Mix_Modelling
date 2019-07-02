@@ -1,0 +1,438 @@
+---
+title: "Exploratory Data Analysis FlipKart E-commerce Data"
+author: "Harsh Shukla, Priya Agarwal"
+date: "17 July 2018"
+runtime: shiny
+output: 
+      flexdashboard::flex_dashboard:
+        orientation: column
+        vertical_layout: scroll
+---
+
+```{r child = 'Model.Rmd'}
+```
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE}
+options(warn=-1)
+library(ggplot2);
+library(plyr);
+library(dplyr);
+library(Hmisc);
+library(broom);
+library(xts);
+library(lubridate)
+library(cluster)
+library(zoo)
+library(magrittr)
+library(knitr)
+library(DT)
+options(warn=-1)
+
+# KPI Function
+KPI_FN <- function(dataset){
+    ##1.Adstock Data 
+    advertisement <- read.csv("advertisement.csv")
+    adstock <- subset(advertisement, select=c(-Total.Investment))    
+    #Dividing by 4.29 
+    for( i in 3:ncol(adstock)){
+        adstock[,i] = adstock[,i]/(4.29)
+    }  
+    merge(dataset, adstock, by=c("Year","Month"), all.x = TRUE)
+    dataset[is.na(dataset)] <- 0
+    ##2.Discount
+    dataset$list_price = dataset$gmv/dataset$units
+    #Discount = List Price - Discount
+    dataset$promotional_offer = (dataset$product_mrp - dataset$list_price)/dataset$product_mrp
+    ##3.Payment Model Indicator
+    dataset$order_pay_id <- ifelse(dataset$s1_fact.order_payment_type   == "Prepaid",1,0)
+    
+    ##4.Prepaid Order %
+    #Total Order Placed
+    total_order <-aggregate(order_pay_id ~ Year+Month+week_year,data=dataset, FUN=NROW)
+    #Total Online Order 
+    online_order <- aggregate(order_pay_id~Year+Month+week_year, data= dataset, FUN=sum)
+    #merge both the files
+    merged <- merge(total_order,online_order,by=c("Month", "Year", "week_year"),all.x=TRUE)
+    #calculating per online order  
+    merged$per_order <- merged$order_pay_id.y / merged$order_pay_id.x
+    #remove other variabled from 
+    #merge with dataset file    
+    merged <- merged[,-c(4,5)]
+    #add per_order in dataset file
+    dataset <- merge(dataset, merged, by=c("Month", "Year", "week_year"),all.x=TRUE)  
+    dataset[is.na(dataset)] <- 0
+    ##5.Brand Perception - Product Category
+    dataset$product_analytic_vertical <- factor(dataset$product_analytic_vertical) 
+    cluster <- aggregate(cbind(units,list_price,product_mrp)~product_analytic_vertical,dataset,mean)
+    if(nrow(cluster) >2){
+        cluster$list_price_1 <- scale(cluster$list_price)
+        cluster$product_mrp_1 <- scale(cluster$product_mrp)
+        cluster$units_1 <- scale(cluster$units)
+        k1 <- cluster[,-c(2:4)]
+      
+        clust <- kmeans(k1[-1], centers=3,iter.max=50,nstart=50) 
+        cluster$P_tag <- as.factor(clust$cluster)
+        cluster <- cluster[,c(1,8)]        
+    #   add extra column in dataset
+        dataset <- merge(dataset,cluster,by=c("product_analytic_vertical"), all.x=TRUE)
+        library("plyr")
+        library("dplyr")
+    
+        k2 <- table(dataset$P_tag)
+    
+        levels(dataset$P_tag)[which(k2==max(table(dataset$P_tag)))] <- "Mass_p"
+        levels(dataset$P_tag)[which(k2==min(table(dataset$P_tag)))] <- "Premium_p"
+        levels(dataset$P_tag)[which(k2!=max(table(dataset$P_tag))& k2!=min(table(dataset$P_tag)))] <- "Middle_p"
+       }
+    else 
+    {
+        dataset$P_tag <- NA
+        dataset$product_analytic_vertical <- factor(dataset$product_analytic_vertical) 
+        if(tapply(dataset$product_mrp, dataset$product_analytic_vertical,mean)[[1]] > (tapply(dataset$product_mrp,dataset$product_analytic_vertical,mean)[[2]]))
+        {
+            dataset$P_tag[which(dataset$product_analytic_vertical == levels(dataset$product_analytic_vertical)[1])] <- "middle"
+            dataset$P_tag[is.na(dataset$P_tag)] <- "mass"
+        } 
+        else
+        { 
+             dataset$P_tag[which(dataset$product_analytic_vertical == levels(dataset$product_analytic_vertical)[2])] <- "middle"
+             dataset$P_tag[is.na(dataset$P_tag)] <- "mass"
+        } 
+    }
+    count <- table(dataset$P_tag)
+     
+    ##6. NPS_Score
+        nps <-read.csv('nps.csv',h=T)
+        nps$Month <- as.character(nps$Month)
+        dataset <- merge(dataset,nps,by=c("Month","Year"),all.x=TRUE)
+    
+    ##7. Total Investment across all Channels
+        inv <- advertisement
+        inv$Month <- as.character(inv$Month)
+        inv$Year  <- as.character(inv$Year)
+        dataset <- merge(dataset,inv,by=c("Month","Year"),all.x=TRUE)
+    
+    ##8. Holiday Effect 
+    
+        holiday_list<-c("2015-07-18","2015-07-19","2015-08-15",
+                  "2015-08-16","2015-08-17","2015-08-28",
+                  "2015-08-29","2015-08-30","2015-10-15",
+                  "2015-10-16","2015-10-17","2015-11-07","2015-11-08","2015-11-09","2015-11-10",
+                  "2015-10-11","2015-10-12","2015-11-13","2015-11-14","2015-12-25","2015-12-26",
+                  "2015-12-27","2015-12-28","2015-12-29","2015-12-30","2016-01-01","2016-01-02",
+                  "2016-01-03","2016-01-20","2016-01-21","2016-01-22","2016-02-01","2016-02-02",
+                  "2016-02-20","2016-02-21","2016-02-14","2016-02-15","2016-03-07","2016-03-08",
+                  "2016-03-09","2016-05-25","2016-05-26","2016-05-27")
+        
+        holiday_list <- as.Date(holiday_list)
+        week_year <- week(holiday_list)
+        year <- year(holiday_list)
+        holiday_data <- data.frame(cbind(year,week_year))
+        holiday_data$holiday_list <- holiday_list
+        holiday_data$number <- 1
+        holiday_data <- aggregate(number~year+week_year,holiday_data, sum)
+        write.csv(holiday_data,"holiday_data.csv",row.names=F)
+        
+        dataset$paste <-paste(dataset$Year, dataset$week_year, sep='_')
+        products <- as.data.frame.matrix(t(table(dataset$P_tag,dataset$week_year)))
+        products$week_year <- row.names(products)
+    
+        holiday_data$paste <-paste(holiday_data$year, holiday_data$week_year, sep='_')
+        holiday_data <- holiday_data[,-c(1:2)]
+        dataset <- merge(dataset, holiday_data, by=c("paste"),all.x=TRUE)
+    
+        dataset$number[is.na(dataset$number)] <- 0
+        dataset <- aggregate(cbind(list_price,product_mrp,gmv,units,sla,promotional_offer,number,Total.Investment,TV,Digital,Sponsorship,Content.Marketing,Online.marketing,Affiliates,SEM,product_procurement_sla,per_order,NPS)~week_year,data=dataset,FUN=mean)   
+        dataset <- merge(dataset,products,by=c("week_year"),all.x=TRUE)
+        
+        
+    return(dataset)
+}
+
+advanced_kpi <- function(dataset){
+  library(dplyr)
+  library(zoo)
+  
+  myfun1 = function(x) rollmean(x, k = 2, fill = NA, align = "right")
+  myfun2 = function(x) rollmean(x, k = 3, fill = NA, align = "right")
+  myfun3 = function(x) rollmean(x, k = 4, fill = NA, align = "right")
+  
+  #dataset1<-arrange(dataset1,P_analytic_vertical,Year,week_year)
+  
+  x=dataset[,c("week_year","list_price","promotional_offer")]
+  
+  
+  x1<-x %>% mutate_each(funs(myfun1),list_price,promotional_offer) %>% data.frame()
+  
+  x2<-x %>% mutate_each(funs(myfun2),list_price,promotional_offer) %>% data.frame()
+  
+  x3<-x %>% mutate_each(funs(myfun3),list_price,promotional_offer) %>% data.frame()
+  
+  
+  x1$LP_MA1<-(x1$list_price)
+  x1$PO_MA1<-(x1$promotional_offer)
+  
+  x2$LP_MA2<-(x2$list_price)
+  x2$PO_MA2<-(x2$promotional_offer)
+  
+  x3$LP_MA3<-(x3$list_price)
+  x3$PO_MA3<-(x3$promotional_offer)
+  
+  x4=cbind(x1[,-c(2:3)],x2[,-c(1:3)],x3[,-c(1:3)])
+  
+  
+  dataset<-merge(dataset,x4,by="week_year")
+    
+  dataset$inc_LP_MA1<-(dataset$list_price - dataset$LP_MA1)/dataset$LP_MA1
+  dataset$inc_LP_MA2<-(dataset$list_price - dataset$LP_MA2)/dataset$LP_MA2
+  dataset$inc_LP_MA3<-(dataset$list_price - dataset$LP_MA3)/dataset$LP_MA3
+  
+  dataset$inc_PO_MA1<-(dataset$promotional_offer - dataset$PO_MA1)/dataset$PO_MA1
+  dataset$inc_PO_MA2<-(dataset$promotional_offer - dataset$PO_MA2)/dataset$PO_MA2
+  dataset$inc_PO_MA3<-(dataset$promotional_offer - dataset$PO_MA3)/dataset$PO_MA3
+  
+  #Deleting some columns
+  
+  dataset$LP_MA1<-NULL
+  dataset$LP_MA2<-NULL
+  dataset$LP_MA3<-NULL
+  
+  dataset$PO_MA1<-NULL
+  dataset$PO_MA2<-NULL
+  dataset$PO_MA3<-NULL
+  names(dataset)[23:28]<-c("inc_LP_MA1","inc_LP_MA2","inc_LP_MA3","inc_PO_MA1","inc_PO_MA2",
+                           "inc_PO_MA3")
+  #------1) Lag of List price by 1 week,2 week, 3 week
+  #------2) Lag of discount(promo_off) by 1 week,2 week, 3 week
+  #------3) Incremental Lag of List price & promotions/discounts by 1 week,2 week, 3 week
+  
+  #-----------------Lag the data after aggregating by week----#
+  
+  #8. Lag List price (different period lags)
+  library(DataCombine)
+  
+  data_dum <- slide(dataset,Var="list_price",slideBy=-1)
+  data_dum <- slide(data_dum,Var="list_price",slideBy=-2)
+  data_dum <- slide(data_dum,Var="list_price",slideBy=-3)
+    
+  data_dum <- slide(data_dum,Var="promotional_offer",slideBy=-1)
+  data_dum <- slide(data_dum,Var="promotional_offer",slideBy=-2)
+  data_dum <- slide(data_dum,Var="promotional_offer",slideBy=-3)
+
+  data_dum <- slide(data_dum,Var="NPS",slideBy=-1)
+  data_dum <- slide(data_dum,Var="NPS",slideBy=-2)
+  data_dum <- slide(data_dum,Var="NPS",slideBy=-3)
+    
+  dataset <- na.omit(data_dum)
+  return (dataset)
+
+}
+
+eda <- function(dataset,name){
+    #AdStock
+    plot1 <- ggplot(dataset,aes(TV,gmv))+geom_point()+geom_smooth(aes=(method="lm"))+ggtitle(name)+labs(x="Adstock TV ",y="GMV")
+    plot1
+    
+    plot2 <-ggplot(dataset,aes(Affiliates,gmv))+geom_point()+geom_smooth(aes=(method="lm"))+ggtitle(name)+labs(x="Affiliates ",y="GMV")
+    plot2
+    
+    plot3 <-ggplot(dataset,aes(Content.Marketing,gmv))+geom_point()+geom_smooth(aes=(method="lm"))+ggtitle(name)+labs(x="Content Marketing",y="GMV")
+    plot3
+    
+    plot4 <-ggplot(dataset,aes(Online.marketing,gmv))+geom_point()+geom_smooth(aes=(method="lm"))+ggtitle(name)+labs(x="Online Marketing",y="GMV")
+    plot4
+    
+    plot5 <-ggplot(dataset,aes(SEM,gmv))+geom_point()+geom_smooth(aes=(method="lm"))+ggtitle(name)+labs(x="SEM Adstock ",y="GMV")
+    plot5
+    
+    plot6 <-ggplot(dataset,aes(Digital,gmv))+geom_point()+geom_smooth(aes=(method="lm"))+ggtitle(name)+labs(x="Digital Adstock ",y="GMV")
+    plot6
+    
+    return(list(plot1,plot2,plot3,plot4,plot5,plot6))
+}
+```
+
+```{r echo=FALSE}
+gaming_accesory <- read.csv("gaming_accesory")
+camera_accesory = read.csv("CameraAccessory")
+home_audio      <- read.csv("home_audio")
+```
+
+# Home {data-navmenu="Project Sections"}
+
+### Market Mix Modelling
+The marketing mix refers to variables that a marketing manager can control to influence a brand’s sales or market share. 
+Traditionally,these variables are summarized as the **four Ps of marketing: product, price, promotion, and place.**
+The perennial question that managers face is,what level or combination of these variables maximizes sales, market share, or profit?
+The answer to this question, in turn, depends on the following question: How do sales or market  share respond to past levels of or expenditures
+on these variables?
+
+### Business Understanding
+An e-commerce firm specialising in electronic products. Over the last one year, they had spent a significant amount of money in marketing. Occasionally, they had also offered big-ticket promotions (similar to the Big Billion Day). They are about to create a marketing budget for the next year which includes spending on commercials, online campaigns, and pricing & promotion strategies. The CFO feels that the money spent over last 12 months on marketing was not sufficiently impactful and that they can either cut on the budget or reallocate it  optimally across marketing levers to improve the revenue response.
+
+### Data Understanding
+* Order level data
+* FSN ID: The unique identification of each SKU
+* Order Date: Date on which the order was placed
+* Order ID: The unique identification number of each order
+* Order item ID: Suppose you order 2 different products under the same order, it generates 2 different order Item IDs under the same order ID; orders a are tracked by the Order Item ID.
+* GMV: Gross Merchandise Value or Revenue
+* Units: Number of units of the specific product sold
+* Order payment type: How the order was paid – prepaid or cash on delivery
+* SLA: Number of days it typically takes to deliver the product
+* Cust id: Unique identification of a customer
+* Product MRP: Maximum retail price of the product
+* Product procurement SLA: Time typically taken to procure the product
+* Apart from this, the following information is also available:
+  * Monthly spend under various advertising channels
+  * Days when there was any special sale
+  * Monthly NPS score – this may work as a proxy to ‘voice of customer’
+  
+### Key Performance Indicators
+**Marketing Metrics and Key Performance Indicators (KPIs)** are measurable values used by marketing teams to demonstrate the effectiveness of campaigns across all marketing channels. Whether you are looking to track digital marketing performance, SEO progress, or your social media growth, having measurable marketing metrics and KPIs set up can help your business reach targets month-over-month. 
+
+* Performance Indicators
+  * Promotion Effect 
+  * Holiday Effect
+  * Brand Perception 
+  * Adstock
+  * Price Inflation 
+  * Lag Sale
+  * Payment Mode
+  * Advertising Mode
+  * Customer Loyalty 
+  * Customer Feedback 
+  * Competition 
+  * Industry Trend
+
+### Feature Engineering
+* Promotion Effect: Special promotion going on site like Big Billion Day
+  * Promotion offered = (MRP - list price)/MRP where list price = GMV/units sold
+  * List price inflation: wrt previous week, wrt average price of previous 2/3/4/5/6 weeks, wrt moving average ofprevious week, wrt moving average of previous month.
+  * Lag sale, i.e. the past value of GMV
+  * Lag promotion, i.e. the past value of promotion
+  * Weekly percentage change in promotion, monthly percentage change in promotion etc.
+* Adstock: Adstock of each of the ‘commercial spends’ (Since we don’t have TRP/ Impression information, we will assume
+spend is directly proportional to the impression)
+* Variable Transformation: Log of adstock, log of other independent variables (log adstocks, log NPS etc.)
+* Brand Perception: you may create a product level variable called product premium-ness – based on the MRP and units sold under each product vertical, you may tag whether the product is a mass market, aspiring or premium product
+* External Variable Effect:
+  * Net Promoter Score(NPS):The Net Promoter Score is an index ranging from -100 to 100 that measures the willingness of customers to recommend a  company’s products or services to others. It is used as a proxy for gauging the customer’s overall satisfaction with a company’s product or service and the customer’s loyalty to the brand.
+  * Holiday Effect
+  
+### List of Engineered KPIs
+* Promotion offered
+* List price inflation
+* Lag sale
+* Lag promotion
+* Weekly percentage change in promotion, monthly percentage change in promotion etc.
+* Adstock
+* Log of adstock
+* Product level variable - mass market, aspiring or premium product
+* Total revenue from the electronic market in India (Month by month)
+* Daily temperature and rainfall –
+* Indian holidays
+
+
+
+
+
+
+# Camera Accesories Data {data-navmenu="Project Sections"}
+
+
+### Dataset
+
+```{r echo=FALSE, paged.print=FALSE}
+datatable(head(camera_accesory),options = list(pageLength = 5))
+```
+
+### Feature Engineering
+
+```{r echo=FALSE}
+camera_accesory_FE <- KPI_FN(camera_accesory)
+datatable(head(camera_accesory_FE),options = list(pageLength = 5))
+```
+
+### Advanced Feature Engineering
+
+```{r echo=FALSE}
+camera_accesory_final <- advanced_kpi(camera_accesory_FE)
+datatable(head(camera_accesory_final),options = list(pageLength = 5))
+```
+
+### Exploratory Data Analysis
+
+```{r echo=FALSE}
+plots_camera_accesory <- eda(camera_accesory_final,'Camera Accesory')
+for (i in seq_along(plots_camera_accesory)) {
+  plot(plots_camera_accesory[[i]], main=i)
+}
+```
+
+# Gaming Accesories Data {data-navmenu="Project Sections"}
+
+
+### Dataset
+
+```{r echo=FALSE}
+datatable(head(gaming_accesory),options = list(pageLength = 5))
+```
+
+### Feature Engineering
+
+```{r echo=FALSE}
+gaming_accesory_FE <- KPI_FN(gaming_accesory)
+datatable(head(gaming_accesory_FE),options = list(pageLength = 5))
+```
+
+### Advanced Feature Engineering
+
+```{r echo=FALSE}
+gaming_accesory_final <- advanced_kpi(gaming_accesory_FE)
+datatable(head(gaming_accesory_final),options = list(pageLength = 5))
+```
+
+### Exploratory Data Analysis
+
+```{r echo=FALSE}
+plots_gaming_accesory <- eda(gaming_accesory_final,'gaming acceory final')
+for (i in seq_along(plots_gaming_accesory)) {
+  plot(plots_gaming_accesory[[i]], main=i)
+}
+```
+
+# Home Audio Accesories Data {data-navmenu="Project Sections"}
+
+
+### Dataset
+
+```{r echo=FALSE}
+datatable(head(home_audio),options = list(pageLength = 5))
+```
+
+### Feature Engineering
+
+```{r echo=FALSE}
+home_audio_FE <- KPI_FN(home_audio)
+datatable(head(home_audio_FE),options = list(pageLength = 5))
+```
+
+### Advanced Feature Engineering
+
+```{r echo=FALSE}
+home_audio_final <- advanced_kpi(home_audio_FE)
+datatable(head(home_audio_final),options = list(pageLength = 5))
+```
+
+### Exploratory Data Analysis
+
+```{r echo=FALSE}
+plots_home_audio <- eda(home_audio_final,'home audio final')
+for (i in seq_along(plots_home_audio)) {
+  plot(plots_gaming_accesory[[i]], main=i)
+}
+```
